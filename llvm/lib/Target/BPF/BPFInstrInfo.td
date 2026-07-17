@@ -1010,25 +1010,21 @@ let Constraints = "$dst = $val" in {
 
 let Predicates = [BPFHasALU32] in {
     foreach P = [// add
-                 [atomic_load_add_i32_monotonic,  XADDW32],
                  [atomic_load_add_i32_acquire,   XFADDW32],
                  [atomic_load_add_i32_release,   XFADDW32],
                  [atomic_load_add_i32_acq_rel,   XFADDW32],
                  [atomic_load_add_i32_seq_cst,   XFADDW32],
                  // and
-                 [atomic_load_and_i32_monotonic,  XANDW32],
                  [atomic_load_and_i32_acquire,   XFANDW32],
                  [atomic_load_and_i32_release,   XFANDW32],
                  [atomic_load_and_i32_acq_rel,   XFANDW32],
                  [atomic_load_and_i32_seq_cst,   XFANDW32],
                  // or
-                 [atomic_load_or_i32_monotonic,   XORW32],
                  [atomic_load_or_i32_acquire,    XFORW32],
                  [atomic_load_or_i32_release,    XFORW32],
                  [atomic_load_or_i32_acq_rel,    XFORW32],
                  [atomic_load_or_i32_seq_cst,    XFORW32],
                  // xor
-                 [atomic_load_xor_i32_monotonic,  XXORW32],
                  [atomic_load_xor_i32_acquire,   XFXORW32],
                  [atomic_load_xor_i32_release,   XFXORW32],
                  [atomic_load_xor_i32_acq_rel,   XFXORW32],
@@ -1039,8 +1035,7 @@ let Predicates = [BPFHasALU32] in {
 
     // atomic_load_sub can be represented as a neg followed
     // by an atomic_load_add.
-    foreach P = [[atomic_load_sub_i32_monotonic,  XADDW32],
-                 [atomic_load_sub_i32_acquire,   XFADDW32],
+    foreach P = [[atomic_load_sub_i32_acquire,   XFADDW32],
                  [atomic_load_sub_i32_release,   XFADDW32],
                  [atomic_load_sub_i32_acq_rel,   XFADDW32],
                  [atomic_load_sub_i32_seq_cst,   XFADDW32],
@@ -1049,7 +1044,6 @@ let Predicates = [BPFHasALU32] in {
     }
 
     foreach P = [// add
-                 [atomic_load_add_i64_monotonic,  XADDD],
                  [atomic_load_add_i64_acquire,   XFADDD],
                  [atomic_load_add_i64_release,   XFADDD],
                  [atomic_load_add_i64_acq_rel,   XFADDD],
@@ -1059,8 +1053,7 @@ let Predicates = [BPFHasALU32] in {
     }
 }
 
-foreach P = [[atomic_load_sub_i64_monotonic,  XADDD],
-             [atomic_load_sub_i64_acquire,   XFADDD],
+foreach P = [[atomic_load_sub_i64_acquire,   XFADDD],
              [atomic_load_sub_i64_release,   XFADDD],
              [atomic_load_sub_i64_acq_rel,   XFADDD],
              [atomic_load_sub_i64_seq_cst,   XFADDD],
@@ -1084,6 +1077,64 @@ def atomic_load_ # op # _i64_monotonic_nu:
     binop_no_use <!cast<SDPatternOperator>("atomic_load_"#op# _i64_monotonic)>;
 def atomic_load_ # op # _i64_monotonic_hu:
     binop_has_use<!cast<SDPatternOperator>("atomic_load_"#op# _i64_monotonic)>;
+}
+
+foreach op = [add, sub, and, or, xor] in {
+def atomic_load_ # op # _i32_monotonic_nu:
+    binop_no_use <!cast<SDPatternOperator>("atomic_load_"#op# _i32_monotonic)>;
+def atomic_load_ # op # _i32_monotonic_hu:
+    binop_has_use<!cast<SDPatternOperator>("atomic_load_"#op# _i32_monotonic)>;
+}
+
+def atomic_load_sub_i64_monotonic_nu:
+    binop_no_use <atomic_load_sub_i64_monotonic>;
+def atomic_load_sub_i64_monotonic_hu:
+    binop_has_use<atomic_load_sub_i64_monotonic>;
+
+// For monotonic (relaxed) ordering, the no-fetch atomic instructions
+// (lock *(uXX *)(addr) op= val) do not return the old value: they may only
+// be selected when the atomicrmw result is unused. Select the fetch variants
+// when the result is live.
+let Predicates = [BPFHasALU32] in {
+  foreach P = [// add
+               [atomic_load_add_i32_monotonic_nu,  XADDW32],
+               [atomic_load_add_i32_monotonic_hu, XFADDW32],
+               // and
+               [atomic_load_and_i32_monotonic_nu,  XANDW32],
+               [atomic_load_and_i32_monotonic_hu, XFANDW32],
+               // or
+               [atomic_load_or_i32_monotonic_nu,   XORW32],
+               [atomic_load_or_i32_monotonic_hu,  XFORW32],
+               // xor
+               [atomic_load_xor_i32_monotonic_nu,  XXORW32],
+               [atomic_load_xor_i32_monotonic_hu, XFXORW32],
+              ] in {
+    def : Pat<(P[0] ADDRri:$addr, GPR32:$val), (P[1] ADDRri:$addr, GPR32:$val)>;
+  }
+
+  // atomic_load_sub is a neg followed by an atomic_load_add.
+  def : Pat<(atomic_load_sub_i32_monotonic_nu ADDRri:$addr, GPR32:$val),
+            (XADDW32 ADDRri:$addr, (NEG_32 GPR32:$val))>;
+  def : Pat<(atomic_load_sub_i32_monotonic_hu ADDRri:$addr, GPR32:$val),
+            (XFADDW32 ADDRri:$addr, (NEG_32 GPR32:$val))>;
+
+  def : Pat<(atomic_load_add_i64_monotonic_nu ADDRri:$addr, GPR:$val),
+            (XADDD ADDRri:$addr, GPR:$val)>;
+  def : Pat<(atomic_load_add_i64_monotonic_hu ADDRri:$addr, GPR:$val),
+            (XFADDD ADDRri:$addr, GPR:$val)>;
+  def : Pat<(atomic_load_sub_i64_monotonic_hu ADDRri:$addr, GPR:$val),
+            (XFADDD ADDRri:$addr, (NEG_64 GPR:$val))>;
+}
+
+// A relaxed sub with an unused result is a plain XADDD of the negated value
+// on all CPUs. For v1/v2, which have no fetch instructions, also select XADDD
+// when the result is live so that BPFMIChecking keeps reporting
+// "Invalid usage of the XADD return value".
+def : Pat<(atomic_load_sub_i64_monotonic_nu ADDRri:$addr, GPR:$val),
+          (XADDD ADDRri:$addr, (NEG_64 GPR:$val))>;
+let Predicates = [BPFNoALU32] in {
+  def : Pat<(atomic_load_sub_i64_monotonic_hu ADDRri:$addr, GPR:$val),
+            (XADDD ADDRri:$addr, (NEG_64 GPR:$val))>;
 }
 
 foreach P = [// and
